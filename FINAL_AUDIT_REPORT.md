@@ -1,5 +1,9 @@
 # SalesPilot AI assessment readiness audit
 
+## Release follow-up on 2026-11-26
+
+The historical findings below describe the earlier audit. The release now guards interval overlap in SQLite, reopens cancelled slots, preserves legacy appointment rows, and attributes conversion and summary bookings to originating proposals. Structured tool execution runs across bounded rounds. Optional Gemini embeddings and model sentiment are implemented. Provider credentials, browser hardware, Playwright and rescheduling remain outstanding. See `RELEASE_COVERAGE.md` and `TEST_REPORT.md` for current status.
+
 Audit date: 2026-11-25. Reviewed the original specification, engineering rules, acceptance checklist, progress and prior test results against the current frontend, backend, local database, AI adapter, tools, and demo documentation. Re-ran verification from the working tree.
 
 ## Readiness

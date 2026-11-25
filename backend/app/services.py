@@ -7,12 +7,27 @@ from sqlalchemy.orm import Session
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from . import models
+from .embeddings import semantic_scores
 
 def bant(data: dict) -> tuple[int, str, dict]:
     def points(key):
         value = str(data.get(key) or "").strip()
-        known = value.casefold() not in {"", "unknown", "n/a", "none", "not provided", "undecided", "tbd"}
-        return {"points": 25 if known else 0, "evidence": value if known else "Unknown"}
+        normalized = value.casefold()
+        if normalized in {"", "unknown", "n/a", "none", "not provided", "undecided", "tbd"}:
+            return {"points": 0, "evidence": value or "Unknown", "qualification": "Unknown"}
+        negative, partial, qualified = {
+            "budget": (r"no budget|cannot afford|not approved", r"pending|estimated|maybe|approval|\d", r"approved|confirmed|allocated"),
+            "authority": (r"no authority", r"not (?:the |a )?decision.maker|influenc|recommend|committee", r"owner|decision.maker|final approv"),
+            "requirements": (r"no (?:relevant |business )?need|not needed|not interested", r"exploring|researching|unsure", r"\w"),
+            "timeline": (r"no plans|not buying|next year", r"months|quarter|eventually|later", r"weeks?|days?|soon|now|urgent|this month"),
+        }[key]
+        if re.search(negative, normalized):
+            points, classification = 0, "Unqualified"
+        elif re.search(partial, normalized) and not (key == "budget" and re.search(qualified, normalized)) or not re.search(qualified, normalized):
+            points, classification = 12, "Partially qualified"
+        else:
+            points, classification = 25, "Qualified"
+        return {"points": points, "evidence": value, "qualification": classification}
     out = {"budget": points("budget"), "authority": points("authority"), "need": points("requirements"), "timeline": points("timeline")}
     score = sum(x["points"] for x in out.values())
     return score, "Hot" if score >= 75 else "Warm" if score >= 40 else "Cold", out
@@ -20,6 +35,8 @@ def bant(data: dict) -> tuple[int, str, dict]:
 POSITIVE = {"great", "good", "excellent", "interested", "love", "yes", "धन्यवाद", "अच्छा"}
 NEGATIVE = {"bad", "expensive", "unhappy", "no", "problem", "hate", "महंगा", "समस्या"}
 def sentiment(text: str) -> str:
+    if re.search(r"\b(?:not|never)\s+(?:very\s+)?(?:good|great|excellent|happy)\b|अच्छा नहीं", text.casefold()):
+        return "Negative"
     words = set(re.findall(r"[\w\u0900-\u097f]+", text.lower()))
     p, n = len(words & POSITIVE), len(words & NEGATIVE)
     return "Positive" if p > n else "Negative" if n > p else "Neutral"
@@ -28,12 +45,16 @@ def retrieve(db: Session, query: str, top_k=4):
     rows = db.execute(select(models.Chunk, models.Document).join(models.Document)).all()
     if not rows: return []
     texts = [r.Chunk.text for r in rows]
+    scores = semantic_scores(db, [row.Chunk for row in rows], query)
+    mode, threshold = "gemini_embeddings", 0.5
     try:
-        matrix = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5)).fit_transform(texts + [query])
-        scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
+        if scores is None:
+            mode, threshold = "lexical_tfidf_fallback", 0.03
+            matrix = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5)).fit_transform(texts + [query])
+            scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
     except ValueError: return []
     ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
-    return [{"document_id": rows[i].Document.id, "filename": rows[i].Document.filename, "chunk": texts[i], "score": round(float(scores[i]), 4)} for i in ranked if scores[i] > 0]
+    return [{"document_id": rows[i].Document.id, "filename": rows[i].Document.filename, "chunk": texts[i], "score": round(float(scores[i]), 4), "retrieval_mode": mode} for i in ranked if scores[i] >= threshold]
 
 def create_lead(db: Session, data: dict):
     if data.get("email"): data["email"] = data["email"].strip().lower()
@@ -45,6 +66,8 @@ def create_lead(db: Session, data: dict):
         existing = db.scalar(select(models.Lead).where(or_(*clauses)))
     lead = existing or models.Lead()
     for k, v in data.items():
+        if k == "conversation_id" and existing and lead.conversation_id:
+            continue
         if v is not None and hasattr(lead, k): setattr(lead, k, v)
     score, classification, breakdown = bant({c.name: getattr(lead, c.name) for c in models.Lead.__table__.columns})
     lead.score, lead.classification, lead.score_breakdown = score, classification, breakdown
@@ -91,6 +114,9 @@ def book(db, lead_id, starts_at, confirmed, key=None):
         raise ValueError("Time is not an available business slot")
     ap=models.Appointment(lead_id=lead_id, starts_at=starts_at, ends_at=starts_at+timedelta(minutes=cfg["appointment_minutes"]), idempotency_key=key)
     db.add(ap)
+    lead = db.get(models.Lead, lead_id)
+    if lead.status in {"New", "Contacted", "Qualified"}:
+        lead.status = "Demo Scheduled"
     try: db.commit()
     except IntegrityError: db.rollback(); raise ValueError("Time slot is already booked")
     db.refresh(ap); return ap
@@ -104,4 +130,8 @@ def analytics(db):
     confirmed=db.scalar(select(func.count()).select_from(models.Appointment).where(models.Appointment.status=="confirmed")) or 0
     cancelled=db.scalar(select(func.count()).select_from(models.Appointment).where(models.Appointment.status=="cancelled")) or 0
     durations=[(c.ended_at-c.started_at).total_seconds() for c in db.scalars(select(models.Conversation).where(models.Conversation.ended_at.is_not(None))).all()]
-    return {"total_conversations":conv,"completed_conversations":complete,"total_leads":leads,"qualified_leads":classes.get("Hot",0)+classes.get("Warm",0),"lead_distribution":{"Hot":classes.get("Hot",0),"Warm":classes.get("Warm",0),"Cold":classes.get("Cold",0)},"sentiment_distribution":sentiments,"confirmed_appointments":confirmed,"cancelled_appointments":cancelled,"appointment_booking_rate":round(confirmed/conv*100,1) if conv else 0,"average_conversation_duration_seconds":round(sum(durations)/len(durations),1) if durations else 0}
+    attributed = db.scalar(select(func.count(func.distinct(models.ToolEvent.conversation_id)))
+        .join(models.Appointment, models.Appointment.idempotency_key == models.ToolEvent.id)
+        .where(models.ToolEvent.tool_name == "propose_appointment", models.ToolEvent.status == "success",
+               models.Appointment.status == "confirmed")) or 0
+    return {"total_conversations":conv,"completed_conversations":complete,"total_leads":leads,"qualified_leads":classes.get("Hot",0)+classes.get("Warm",0),"lead_distribution":{"Hot":classes.get("Hot",0),"Warm":classes.get("Warm",0),"Cold":classes.get("Cold",0)},"sentiment_distribution":sentiments,"confirmed_appointments":confirmed,"cancelled_appointments":cancelled,"appointment_booking_rate":round(attributed/conv*100,1) if conv else 0,"average_conversation_duration_seconds":round(sum(durations)/len(durations),1) if durations else 0}

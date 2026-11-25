@@ -1,5 +1,7 @@
 # Commercial Feasibility and Illustrative Costs
 
+If semantic retrieval is enabled, include document embedding on cache misses and one query embedding per semantic search. Tool follow-up rounds and optional end-of-call excerpt selection also add generation requests.
+
 Target customers are small and mid-market B2B teams with repetitive inbound enquiries. Value comes from faster response, consistent qualification, fewer manual updates, and more bookable coverage—not guaranteed revenue.
 
 Possible pricing combines a base subscription (workspace, seats, CRM, analytics) with usage for AI turns or voice minutes. A prototype uses a laptop and free/low-volume provider tiers. A small-business deployment adds CloudFront/S3, two API tasks, a small managed database, monitoring, and AI usage. A scaled deployment adds Multi-AZ PostgreSQL, Redis, queues, more tasks, vector retrieval, backups, and support.

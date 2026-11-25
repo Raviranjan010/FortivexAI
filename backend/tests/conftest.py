@@ -9,11 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.database import Base,get_db
 from app.main import app
+from app.appointment_schema import initialize_appointment_schema
 
 @pytest.fixture
 def db():
     engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
-    Base.metadata.create_all(engine); Session=sessionmaker(bind=engine,expire_on_commit=False); session=Session()
+    Base.metadata.create_all(engine); initialize_appointment_schema(engine); Session=sessionmaker(bind=engine,expire_on_commit=False); session=Session()
     yield session; session.close()
 @pytest.fixture
 def client(db):

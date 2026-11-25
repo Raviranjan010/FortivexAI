@@ -1,5 +1,7 @@
 # Scalability Strategy: 100,000 Registered Users
 
+The local release caches optional Gemini chunk embeddings in SQLite. A shared deployment should move indexing out of the request path and enforce tenant boundaries before embedding queries or storing vectors.
+
 Assume 100,000 registered users, 20,000 daily active users, a 10% peak-hour share, and 5% of peak users in simultaneous voice sessions: about 100 concurrent sessions. At six turns per five-minute session, peak generation is roughly 120 requests/minute; quotas and latency must be measured rather than assumed.
 
 Host the Vite bundle on S3 behind CloudFront. Route API traffic through WAF and an Application Load Balancer to stateless ECS Fargate tasks. Cognito issues tenant-scoped identity. Store transactional data in Multi-AZ RDS PostgreSQL with PgBouncer-style pooling, composite tenant/time indexes, read replicas for analytics, and point-in-time recovery. Use a managed vector service or PostgreSQL pgvector for embeddings. ElastiCache Redis holds rate limits, ephemeral session summaries, and hot catalog results. SQS absorbs summaries, ingestion, CRM sync, and analytics jobs with dead-letter queues and backpressure.

@@ -53,7 +53,6 @@ class Lead(Base):
 
 class Appointment(Base):
     __tablename__ = "appointments"
-    __table_args__ = (UniqueConstraint("starts_at", name="uq_appointment_start"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id"), index=True)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -76,6 +75,12 @@ class Chunk(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
     ordinal: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
+
+class ChunkEmbedding(Base):
+    __tablename__ = "chunk_embeddings"
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(120), primary_key=True)
+    vector: Mapped[list[float]] = mapped_column(JSON)
 
 class ToolEvent(Base):
     __tablename__ = "tool_events"

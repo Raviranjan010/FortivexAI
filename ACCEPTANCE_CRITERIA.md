@@ -9,7 +9,8 @@
 - [x] BANT scoring is deterministic and evidence-based; sentiment is transcript-only.
 - [ ] CRM provides dedicated customer detail views and UI search/filter controls. Basic lead operations and CSV export exist.
 - [x] Booking rejects past/out-of-hours/conflicting/unconfirmed requests and persists confirmed ones.
-- [x] Summaries and analytics use database facts only.
+- [x] Summary business facts and booking conversion use session-attributed database records. An optional Gemini purpose excerpt must match the customer transcript.
+- [ ] Live neural retrieval quality in English and Hindi has been verified with the configured account.
 - [ ] Nine pages exist. Browser accessibility and consistent error states remain to be verified.
 - [x] Backend suite, frontend tests, typecheck, and production build pass.
 - [x] Required operational, security, architecture, cost, and interview documentation exists.

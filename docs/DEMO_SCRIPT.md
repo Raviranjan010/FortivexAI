@@ -1,5 +1,7 @@
 # Five-Minute Demo
 
+Start with `powershell -ExecutionPolicy Bypass -File .\start.ps1 -BackendPort 8011`. Before the assessment, verify the configured Gemini model with the opt-in live test and rehearse microphone permission, playback and text fallback in Chromium.
+
 1. Run setup/start, open the Overview, and note database-derived zero/actual values.
 2. Open Knowledge Base and show the seeded NovaCRM catalog; upload a small TXT policy if desired.
 3. Open Live Agent, select English/Hindi, accept consent, and start. Ask “What is the Growth plan price?” Use text if STT is unavailable.

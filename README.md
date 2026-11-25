@@ -1,5 +1,7 @@
 # SalesPilot AI
 
+See [release coverage](RELEASE_COVERAGE.md) for the verified assessment scope. Use `powershell -ExecutionPolicy Bypass -File .\start.ps1 -BackendPort 8011` when port 8000 is occupied. Append `-VerifyOnly` to check readiness and shut both services down. To opt in to semantic retrieval for approved demo data, set `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` in the untracked `.env`.
+
 SalesPilot AI is a Windows-first, database-backed sales voice-agent prototype for the fictional B2B company NovaCRM. It combines browser speech APIs, Gemini structured generation, persistent conversation memory, document retrieval, deterministic lead qualification, an internal CRM, confirmed appointment scheduling, and real database analytics.
 
 ## Quick start

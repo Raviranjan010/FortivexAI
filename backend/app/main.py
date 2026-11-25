@@ -1,4 +1,4 @@
-import io, re
+import io, json, re
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -6,14 +6,16 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
-from sqlalchemy import or_, select, text as sql_text
+from sqlalchemy import delete, or_, select, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from . import ai, models, schemas, services, tools
 from .config import get_settings
 from .database import Base, engine, get_db
+from .appointment_schema import initialize_appointment_schema
 
 cfg=get_settings(); Base.metadata.create_all(engine)
+initialize_appointment_schema(engine)
 app=FastAPI(title="SalesPilot AI API",version="1.0.0")
 app.add_middleware(CORSMiddleware,allow_origins=[cfg.frontend_origin],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 
@@ -48,17 +50,41 @@ def chat(sid:str,body:schemas.ChatIn,db:Session=Depends(get_db)):
         result = provider.respond(history,sources,session.language)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     events=[]
-    for call in result.tool_calls[:3]:
+    any_response_sentiment = result.sentiment is not None
+    turn_sentiment = result.sentiment or services.sentiment(body.content)
+    attempted = set()
+    extracted = {}
+    for _ in range(4):
+        extracted.update(tools.ProfileArgs.model_validate(
+            {key: value for key, value in result.extracted.items()
+             if key in tools.ProfileArgs.model_fields and (isinstance(value, str) or key == "company_size" and isinstance(value, int))}
+        ).model_dump(exclude_none=True))
+        if not result.tool_calls:
+            break
+        batch = []
+        for call in result.tool_calls[:3]:
+            signature = (call.name, json.dumps(call.arguments, sort_keys=True))
+            if signature in attempted:
+                batch.append({"tool_name":call.name,"status":"skipped","result":{"error":"Identical call already attempted this turn"}})
+                continue
+            attempted.add(signature)
+            try:
+                outcome,event=tools.execute(db,sid,call.name,call.arguments)
+                batch.append({"id":event.id,"tool_name":event.tool_name,"status":event.status,"result":outcome,"duration_ms":event.duration_ms,"timestamp":event.created_at.isoformat()})
+            except ValueError as exc:
+                batch.append({"tool_name":call.name,"status":"failed","result":{"error":str(exc)}})
+        events.extend(batch)
+        history.append({"role":"system","content":"Observable tool results: "+json.dumps(batch, ensure_ascii=False)})
         try:
-            outcome,event=tools.execute(db,sid,call.name,call.arguments); events.append({"id":event.id,"tool_name":event.tool_name,"status":event.status,"result":outcome,"duration_ms":event.duration_ms,"timestamp":event.created_at.isoformat()})
-        except ValueError as exc:
-            events.append({"tool_name":call.name,"status":"failed","result":{"error":str(exc)}})
-    if events:
-        history.append({"role":"system","content":"Observable tool results: "+str(events)})
-        try: result=provider.respond(history,sources,session.language)
+            result=provider.respond(history,sources,session.language)
         except RuntimeError:
-            result=ai.AIResult(response="The agent could not finish its reply. Review the recorded actions below." if session.language=="en" else "जवाब पूरा नहीं हो सका। नीचे दर्ज कार्रवाइयाँ देखें।", extracted=result.extracted)
-    session.extracted={**session.extracted,**{k:v for k,v in result.extracted.items() if v not in (None,"")}}
+            result=ai.AIResult(response="The agent could not finish its reply. Review the recorded actions below." if session.language=="en" else "जवाब पूरा नहीं हो सका। नीचे दर्ज कार्रवाइयाँ देखें।")
+            break
+    if result.tool_calls:
+        result = ai.AIResult(response="The agent reached its action limit. Review the recorded actions before continuing.")
+    session.extracted={**session.extracted,**{k:v for k,v in extracted.items() if v != ""}}
+    session.extracted = {**session.extracted, "sentiment": turn_sentiment,
+                         "sentiment_method": "gemini" if any_response_sentiment else "lexical_fallback"}
     assistant=models.Message(conversation_id=sid,role="assistant",content=result.response); db.add(assistant); db.commit()
     return {"session_id":sid,"response":result.response,"sources":sources,"tool_events":events}
 
@@ -70,7 +96,7 @@ def confirm_proposal(sid: str, proposal_id: str, db: Session=Depends(get_db)):
             or proposal.tool_name != "propose_appointment" or proposal.status != "success"):
         raise HTTPException(404, "Active appointment proposal not found")
     lead = db.get(models.Lead, proposal.result["lead_id"])
-    if not lead or lead.conversation_id != sid:
+    if not tools.lead_belongs_to_session(db, lead, sid):
         raise HTTPException(409, "The customer is no longer associated with this session")
     try:
         appointment = services.book(db, lead.id, datetime.fromisoformat(proposal.result["starts_at"]), True, proposal.id)
@@ -86,7 +112,17 @@ def end_session(sid:str,db:Session=Depends(get_db)):
         return row
     row.status="ended"; row.ended_at=datetime.now(timezone.utc)
     lead=db.scalar(select(models.Lead).where(models.Lead.conversation_id==sid))
-    row.summary={"customer":lead.name if lead else row.extracted.get("name"),"purpose":"NovaCRM sales enquiry","product_interest":lead.product_interest if lead else row.extracted.get("product_interest"),"requirements":lead.requirements if lead else row.extracted.get("requirements"),"budget":lead.budget if lead else row.extracted.get("budget"),"timeline":lead.timeline if lead else row.extracted.get("timeline"),"objections":lead.objections if lead else None,"sentiment":lead.sentiment if lead else "Neutral","lead_score":lead.score if lead else 0,"actions":[e.tool_name for e in db.scalars(select(models.ToolEvent).where(models.ToolEvent.conversation_id==sid))],"appointment_status":"confirmed" if lead and db.scalar(select(models.Appointment).where(models.Appointment.lead_id==lead.id,models.Appointment.status=="confirmed")) else "not booked","recommended_follow_up":"Review the enquiry and contact the customer if consent was provided."}
+    events = list(db.scalars(select(models.ToolEvent).where(models.ToolEvent.conversation_id == sid)))
+    proposal_ids = [event.id for event in events if event.tool_name == "propose_appointment" and event.status == "success"]
+    booking = db.scalar(select(models.Appointment.id).where(
+        models.Appointment.idempotency_key.in_(proposal_ids), models.Appointment.status == "confirmed").limit(1))
+    row.summary={"customer":lead.name if lead else row.extracted.get("name"),"purpose":"NovaCRM sales enquiry","product_interest":lead.product_interest if lead else row.extracted.get("product_interest"),"requirements":lead.requirements if lead else row.extracted.get("requirements"),"budget":lead.budget if lead else row.extracted.get("budget"),"timeline":lead.timeline if lead else row.extracted.get("timeline"),"objections":lead.objections if lead else None,"sentiment":row.extracted.get("sentiment", "Neutral"),"sentiment_method":row.extracted.get("sentiment_method", "unavailable"),"lead_score":lead.score if lead else 0,"actions":[event.tool_name for event in events if event.status == "success"],"failed_attempts":[event.tool_name for event in events if event.status == "failed"],"appointment_status":"confirmed" if booking else "not booked","summary_method":"deterministic","recommended_follow_up":"Review the enquiry and contact the customer if consent was provided."}
+    if cfg.gemini_api_key:
+        summarize = getattr(ai.get_provider(), "summarize_purpose", None)
+        if summarize:
+            excerpt = summarize([message.content for message in row.messages if message.role == "user"])
+            if excerpt:
+                row.summary = {**row.summary, "purpose": excerpt, "summary_method": "gemini_excerpt_with_persisted_facts"}
     db.commit(); db.refresh(row); return row
 
 @app.get("/api/leads",response_model=list[schemas.LeadOut])
@@ -135,6 +171,8 @@ def appointments(db:Session=Depends(get_db)): return db.scalars(select(models.Ap
 def available_slots(day:datetime=Query(...),db:Session=Depends(get_db)): return {"slots":services.slots(db,day)}
 @app.post("/api/appointments",response_model=schemas.AppointmentOut)
 def create_appointment(body:schemas.BookingIn,db:Session=Depends(get_db)):
+    if body.idempotency_key and db.get(models.ToolEvent, body.idempotency_key):
+        raise HTTPException(409, "Use the conversation confirmation endpoint for a proposal")
     try:return services.book(db,body.lead_id,body.starts_at,body.confirmed,body.idempotency_key)
     except ValueError as exc: raise HTTPException(409,str(exc))
 @app.post("/api/appointments/{aid}/cancel",response_model=schemas.AppointmentOut)
@@ -165,6 +203,8 @@ async def upload(file:UploadFile=File(...),db:Session=Depends(get_db)):
 def delete_document(did:str,db:Session=Depends(get_db)):
     row=db.get(models.Document,did)
     if not row: raise HTTPException(404,"Document not found")
+    db.execute(delete(models.ChunkEmbedding).where(models.ChunkEmbedding.chunk_id.in_(
+        select(models.Chunk.id).where(models.Chunk.document_id == did))))
     db.delete(row); db.commit()
 @app.get("/api/retrieval")
 def search_knowledge(q:str=Query(min_length=2),db:Session=Depends(get_db)): return {"results":services.retrieve(db,q,cfg.rag_top_k)}

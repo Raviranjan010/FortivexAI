@@ -13,11 +13,11 @@
 ## Questions and concise answers
 
 - **Generative vs agentic AI?** Generative AI writes a response; agentic orchestration selects validated tools and incorporates their observable outcomes.
-- **RAG/embeddings/similarity?** Documents are chunked, represented as TF-IDF character n-gram vectors, and ranked by cosine similarity. Production can swap in neural embeddings without changing route contracts.
+- **RAG/embeddings/similarity?** Optional Gemini embeddings are cached per document chunk and ranked by cosine similarity. TF-IDF character n-grams are the labelled fallback. Our multilingual regression uses synthetic vectors.
 - **Function calling?** Gemini returns schema-validated tool requests; the allow-list validates arguments, caps calls at three, executes services, records events, and gives outcomes back to the model.
 - **Memory?** Messages belong to a UUID session. Only the last 12 turns enter the bounded prompt; persisted summaries represent older context.
 - **Speech?** Chromium recognition converts microphone speech to text; synthesis reads the reply. Recognition stops during synthesis to avoid feedback; text is the fallback.
-- **Lead scoring?** `bant()` awards 25 each for evidenced budget, authority, need, and timeline. Unknown is zero; thresholds are Hot 75+, Warm 40+, Cold below 40.
+- **Lead scoring?** `bant()` awards 0, 12 or 25 points per category. Unknown and contradictory negative evidence are handled before positive evidence. Thresholds are Hot 75+, Warm 40+, Cold below 40.
 - **Sentiment?** The MVP classifies transcript words, not voice emotion or biometrics.
 - **Transactions/double booking?** `services.book()` checks confirmation/time/business rules; a unique start constraint and commit catch prevent races.
 - **Security/prompt injection?** Pydantic, ORM queries, CORS, upload limits, secret isolation, untrusted-context instructions, and tool allow-listing reduce risk; production still needs identity and tenant isolation.

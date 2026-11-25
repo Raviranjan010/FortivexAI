@@ -2,6 +2,7 @@ import time
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from . import models, services
 
 class SearchArgs(BaseModel): query: str = Field(min_length=2, max_length=500)
@@ -15,6 +16,16 @@ class SaveLeadArgs(ProfileArgs): pass
 class SummaryArgs(BaseModel): customer:str|None=None; purpose:str|None=None; product_interest:str|None=None; requirements:str|None=None; budget:str|None=None; timeline:str|None=None; objections:str|None=None; sentiment:str="Neutral"; recommended_follow_up:str|None=None
 
 SCHEMAS={"search_knowledge_base":SearchArgs,"get_product_information":SearchArgs,"update_customer_profile":ProfileArgs,"qualify_lead":QualifyArgs,"analyze_sentiment":SentimentArgs,"check_appointment_availability":AvailabilityArgs,"propose_appointment":ProposalArgs,"confirm_appointment":ConfirmArgs,"save_lead_to_crm":SaveLeadArgs,"generate_call_summary":SummaryArgs}
+
+def lead_belongs_to_session(db, lead, session_id):
+    if not lead:
+        return False
+    if lead.conversation_id == session_id:
+        return True
+    events = db.scalars(select(models.ToolEvent).where(
+        models.ToolEvent.conversation_id == session_id,
+        models.ToolEvent.tool_name == "save_lead_to_crm", models.ToolEvent.status == "success"))
+    return any(event.result.get("lead_id") == lead.id for event in events)
 
 def execute(db: Session, session_id: str, name: str, arguments: dict):
     if not db.get(models.Conversation, session_id): raise ValueError("Invalid conversation session")
@@ -31,7 +42,7 @@ def execute(db: Session, session_id: str, name: str, arguments: dict):
         elif name=="check_appointment_availability": result={"slots":[x.isoformat() for x in services.slots(db,args.day)[:8]]}
         elif name=="propose_appointment":
             lead = db.get(models.Lead, args.lead_id) if args.lead_id else None
-            if not lead or lead.conversation_id != session_id:
+            if not lead_belongs_to_session(db, lead, session_id):
                 raise ValueError("Save the customer in this conversation before proposing a slot")
             if args.starts_at.tzinfo is None or args.starts_at not in services.slots(db, args.starts_at):
                 raise ValueError("Choose an available slot with a timezone offset")

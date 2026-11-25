@@ -1,5 +1,13 @@
 # Test Report
 
+Live recheck on 2026-11-26: `SALESPILOT_LIVE_TEST=1` yielded one provider unit-test pass and one credential-gated skip. Full backend: 21 passed, one skipped. Frontend: three passed, TypeScript and production build passed. Dependency check passed. The launcher reached readiness on the requested 8030/5190 ports. No live provider request was made.
+
+Final demo checks on 2026-11-26: the opt-in provider run passed the sanitized timeout test and skipped live Gemini for lack of a key. The full backend suite passed 21 tests with one live skip. Frontend lint and all 3 tests passed. The first parallel build failed with Rolldown out of memory. An isolated build passed with `$env:RAYON_NUM_THREADS='2'`. The launcher now uses that default when no override is set. `start.ps1 -BackendPort 8030 -FrontendPort 5190 -VerifyOnly` passed backend health, proxied health and frontend HTTP readiness. `pip check` and `git diff --check` passed. The Git audit found no tracked local environment or SQLite files and no matching Google API key pattern in tracked sources. Browser and print preview checks were unavailable.
+
+Final release rerun after the multi-round regression: 21 backend tests passed, one credential-gated test skipped. The launcher also passed on ports 8027/5187. No Google API-key pattern was found in application sources or the example environment file.
+
+Release rerun on 2026-11-26: `$env:SALESPILOT_LIVE_TEST='1'; .\.venv\Scripts\python -m pytest backend/tests -q` produced 20 passes and 1 skipped live test. Added checks cover migration, concurrent overlapping writes, slot reuse, BANT contradictions and cached semantic retrieval with test vectors. `pip check`, frontend lint/test/build and `git diff --check` passed. Frontend had 3 passing tests and the existing bundle-size warning. `start.ps1 -BackendPort 8026 -FrontendPort 5186 -VerifyOnly` reached readiness and exited. No live provider or physical browser hardware was exercised.
+
 Frontend redesign verification on 2026-11-25: `npm run lint` and `npm run build` passed. `npm run test` passed all 3 tests, including microphone signal scaling. Backend regression was 16 passed and 1 credential-gated skip. The Vite proxy returned a healthy database connection. Vite reported a 654.23 KB JavaScript chunk warning. Browser appearance and physical microphone behavior were not manually verified.
 
 The local API workflow uses a deterministic provider double. Live Gemini is tracked separately.

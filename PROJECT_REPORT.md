@@ -1,5 +1,7 @@
 # SalesPilot AI — Autonomous AI Sales Voice Agent
 
+Release update: the tool loop now supports bounded follow-up actions, optional Gemini embeddings cache chunk vectors, and SQLite enforces non-overlapping active bookings. Live Gemini and hardware verification remain outstanding.
+
 Sales teams lose time to repetitive product questions, inconsistent qualification, manual CRM entry, and delayed demo scheduling. SalesPilot AI is a commercially oriented prototype that demonstrates how an autonomous sales representative can respond continuously while preserving verifiable business records. The included use case is NovaCRM, a clearly fictional B2B SaaS company with a replaceable product knowledge base.
 
 The solution combines a responsive React and TypeScript interface with a modular FastAPI backend, SQLAlchemy, and SQLite. Customers can converse through browser speech recognition and speech synthesis in English or Hindi, or use the always-available text fallback. A consent notice precedes voice use, and raw audio is not stored. Conversation sessions, messages, extracted facts, tool events, summaries, leads, and appointments persist across restarts.

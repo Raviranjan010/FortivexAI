@@ -1,5 +1,7 @@
 # Progress
 
+Release follow-up on 2026-11-26 implemented supervised startup, bounded structured tool rounds, optional cached Gemini embeddings, evidence levels, transcript sentiment, SQLite overlap enforcement and session-attributed analytics. See `RELEASE_COVERAGE.md` for verification boundaries.
+
 The frontend redesign makes Live Voice Agent the default workspace. It adds a Web Audio input meter, transcript and activity panels, customer details, lead score meters, CRM search, and a date-filtered appointment agenda. Real microphone and visual browser verification remain open.
 
 ## Completed
