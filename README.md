@@ -16,7 +16,8 @@ Open http://localhost:5173. API documentation is at http://localhost:8000/docs.
 Manual fallback:
 
 ```powershell
-.\.venv\Scripts\python -m app.seed --app-dir backend
+$env:PYTHONPATH = (Resolve-Path 'backend').Path
+.\.venv\Scripts\python -m app.seed
 .\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --reload --port 8000
 npm --prefix frontend run dev
 ```

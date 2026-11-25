@@ -28,7 +28,7 @@ def retrieve(db: Session, query: str, top_k=4):
     if not rows: return []
     texts = [r.Chunk.text for r in rows]
     try:
-        matrix = TfidfVectorizer(ngram_range=(1, 2), stop_words="english").fit_transform(texts + [query])
+        matrix = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5)).fit_transform(texts + [query])
         scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
     except ValueError: return []
     ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]

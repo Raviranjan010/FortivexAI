@@ -1,5 +1,6 @@
 from datetime import datetime,timedelta,timezone
 from app import models,services
+from app import tools
 
 def test_health_and_no_secret(client):
     assert client.get("/api/health").status_code==200
@@ -45,3 +46,11 @@ def test_summary_persists(client):
     session=client.post("/api/conversations",json={}).json()
     end=client.post(f'/api/conversations/{session["id"]}/end').json()
     assert end["status"]=="ended" and end["summary"]["appointment_status"]=="not booked"
+def test_tool_registry_validation_and_unknown(db):
+    session=models.Conversation(); db.add(session); db.commit()
+    result,event=tools.execute(db,session.id,"qualify_lead",{"requirements":"automation","timeline":"30 days"})
+    assert result["score"]==50 and event.status=="success"
+    result,event=tools.execute(db,session.id,"analyze_sentiment",{"text":"This is great"})
+    assert result["sentiment"]=="Positive"
+    import pytest
+    with pytest.raises(ValueError,match="Unknown tool"): tools.execute(db,session.id,"run_code",{})

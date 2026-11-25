@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-from . import ai, models, schemas, services
+from . import ai, models, schemas, services, tools
 from .config import get_settings
 from .database import Base, engine, get_db
 
@@ -40,9 +40,19 @@ def chat(sid:str,body:schemas.ChatIn,db:Session=Depends(get_db)):
     history=[{"role":m.role,"content":m.content} for m in session.messages[-12:]]
     try: result=ai.get_provider().respond(history,sources,session.language)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
+    events=[]
+    for call in result.tool_calls[:3]:
+        try:
+            outcome,event=tools.execute(db,sid,call.name,call.arguments); events.append({"tool_name":event.tool_name,"status":event.status,"result":outcome,"duration_ms":event.duration_ms,"timestamp":event.created_at.isoformat()})
+        except ValueError as exc:
+            events.append({"tool_name":call.name,"status":"failed","result":{"error":str(exc)}})
+    if events:
+        history.append({"role":"system","content":"Observable tool results: "+str(events)})
+        try: result=ai.get_provider().respond(history,sources,session.language)
+        except RuntimeError as exc: raise HTTPException(503,str(exc))
     session.extracted={**session.extracted,**{k:v for k,v in result.extracted.items() if v not in (None,"")}}
     assistant=models.Message(conversation_id=sid,role="assistant",content=result.response); db.add(assistant); db.commit()
-    return {"session_id":sid,"response":result.response,"sources":sources,"tool_events":[]}
+    return {"session_id":sid,"response":result.response,"sources":sources,"tool_events":events}
 
 @app.post("/api/conversations/{sid}/end",response_model=schemas.SessionOut)
 def end_session(sid:str,db:Session=Depends(get_db)):

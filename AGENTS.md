@@ -28,7 +28,7 @@ Build a reliable Windows-first NovaCRM sales-agent demonstration. Never report a
 ## Commands
 - Setup: `powershell -ExecutionPolicy Bypass -File .\setup.ps1`
 - Backend: `.\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --reload --port 8000`
-- Frontend: `npm --prefix frontend run dev`
+- Frontend: `Push-Location frontend; npm run dev; Pop-Location`
 - Backend tests: `.\.venv\Scripts\python -m pytest backend/tests -q`
 - Frontend checks: `npm --prefix frontend run test` and `npm --prefix frontend run build`
 
