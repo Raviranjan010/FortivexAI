@@ -1,0 +1,2 @@
+export type VoiceState='IDLE'|'LISTENING'|'PROCESSING'|'SPEAKING'|'ERROR'|'ENDED';
+export function canTransition(from:VoiceState,to:VoiceState){const allowed:Record<VoiceState,VoiceState[]>={IDLE:['LISTENING','ENDED','ERROR'],LISTENING:['PROCESSING','ENDED','ERROR'],PROCESSING:['SPEAKING','LISTENING','ERROR','ENDED'],SPEAKING:['LISTENING','ENDED','ERROR'],ERROR:['IDLE','ENDED'],ENDED:['IDLE']};return allowed[from].includes(to)}

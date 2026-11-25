@@ -1,0 +1,3 @@
+const BASE=import.meta.env.VITE_API_URL||'';
+async function request<T>(path:string,init?:RequestInit):Promise<T>{const r=await fetch(BASE+path,{...init,headers:{'Content-Type':'application/json',...(init?.headers||{})}});if(!r.ok){let detail=`Request failed (${r.status})`;try{detail=(await r.json()).detail||detail}catch{}throw new Error(detail)}return r.status===204?undefined as T:r.json()}
+export const api={get:<T>(p:string)=>request<T>(p),post:<T>(p:string,b?:unknown)=>request<T>(p,{method:'POST',body:b===undefined?undefined:JSON.stringify(b)}),put:<T>(p:string,b:unknown)=>request<T>(p,{method:'PUT',body:JSON.stringify(b)}),del:(p:string)=>request<void>(p,{method:'DELETE'})};
