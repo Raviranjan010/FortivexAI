@@ -1,8 +1,23 @@
 import React,{useEffect,useRef,useState} from 'react';import{createRoot}from'react-dom/client';import{BarChart3,BookOpen,Calendar,History,LayoutDashboard,Mic,Settings as SettingsIcon,Users,UserRound,Square,VolumeX,Send,Trash2,Download}from'lucide-react';import{BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,PieChart,Pie,Cell}from'recharts';import{api}from'./api';import type{VoiceState}from'./voice';import'./styles.css';
 type Page='Overview'|'Live Agent'|'Leads'|'CRM'|'Appointments'|'Knowledge Base'|'Conversations'|'Analytics'|'Settings';
 const pages:[Page,React.ElementType][]=[['Overview',LayoutDashboard],['Live Agent',Mic],['Leads',Users],['CRM',UserRound],['Appointments',Calendar],['Knowledge Base',BookOpen],['Conversations',History],['Analytics',BarChart3],['Settings',SettingsIcon]];
-function useLoad<T>(path:string,seed:T){const[data,setData]=useState(seed),[error,setError]=useState(''),[loading,setLoading]=useState(true);const load=()=>{setLoading(true);api.get<T>(path).then(setData).catch(e=>setError(e.message)).finally(()=>setLoading(false))};useEffect(load,[path]);return{data,error,loading,load}}
-const Empty=({children}:{children:string})=><div className="empty">{children}</div>;const ErrorBox=({text}:{text:string})=>text?<div className="error">{text}</div>:null;
+function useLoad<T>(path: string, seed: T) {
+  const [data, setData] = useState(seed);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError('');
+    api.get<T>(path).then(value => { if (current) setData(value); })
+      .catch(failure => { if (current) setError(failure.message); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [path, revision]);
+  return {data, error, loading, load: () => setRevision(value => value + 1)};
+}
+const Empty=({children}:{children:string})=><div className="empty">{children}</div>;const ErrorBox=({text}:{text:string})=>text?<div className="error" role="alert">{text}</div>:null;
 function Overview(){const{data:a,loading,error}=useLoad<any>('/api/analytics',{});if(loading)return <p>Loading business data…</p>;const metrics=[['Conversations',a.total_conversations],['Leads',a.total_leads],['Qualified',a.qualified_leads],['Appointments',a.confirmed_appointments]];return <><ErrorBox text={error}/><div className="metrics">{metrics.map(x=><article><span>{x[0]}</span><strong>{x[1]??0}</strong></article>)}</div><section><h2>Pipeline snapshot</h2>{a.total_leads?<ResponsiveContainer width="100%" height={260}><BarChart data={Object.entries(a.lead_distribution).map(([name,value])=>({name,value}))}><XAxis dataKey="name"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="value" fill="#2563eb"/></BarChart></ResponsiveContainer>:<Empty>No lead activity yet. Start a conversation or add a lead.</Empty>}</section></>}
 type AgentEvent = {id?: string; tool_name: string; status: string; timestamp?: string; duration_ms?: number; result: {starts_at?: string; error?: string; score?: number}};
 type AgentReply = {response: string; sources: {filename: string}[]; tool_events: AgentEvent[]};
@@ -33,8 +48,23 @@ function AgentActivity({events, sessionId}: {events: AgentEvent[]; sessionId: st
     </span>)}</span>;
 }
 
-function LiveAgent(){const[session,setSession]=useState<any>(undefined),[messages,setMessages]=useState<any[]>([]),[input,setInput]=useState(''),[state,setState]=useState<VoiceState>('IDLE'),[language,setLanguage]=useState('en'),[error,setError]=useState(''),[consent,setConsent]=useState(false),recognition=useRef<any>(undefined);
- const start=async()=>{if(!consent)return setError('Consent is required before voice interaction.');try{setSession(await api.post('/api/conversations',{language}));setMessages([]);setState('LISTENING');setError('')}catch(e:any){setError(e.message)}};
+function LiveAgent({active}: {active: boolean}){const[session,setSession]=useState<any>(undefined),[messages,setMessages]=useState<any[]>([]),[input,setInput]=useState(''),[state,setState]=useState<VoiceState>('IDLE'),[language,setLanguage]=useState('en'),[error,setError]=useState(''),[consent,setConsent]=useState(false),recognition=useRef<any>(undefined);
+ const [starting, setStarting] = useState(false);
+ const start = async () => {
+   if (!consent || busy.current) return;
+   busy.current = true;
+   setStarting(true);
+   setError('');
+   try {
+     setSession(await api.post('/api/conversations', {language}));
+     setMessages([]);
+     setEvents([]);
+     setCustomer({});
+     setScore(undefined);
+     setState('LISTENING');
+   } catch (error) { setError(error instanceof Error ? error.message : 'Could not start the session'); }
+   finally { busy.current = false; setStarting(false); }
+ };
  const busy = useRef(false);
  const [capturing, setCapturing] = useState(false);
  const [level, setLevel] = useState(0);
@@ -44,9 +74,19 @@ function LiveAgent(){const[session,setSession]=useState<any>(undefined),[message
  const [events, setEvents] = useState<AgentEvent[]>([]);
  const transcript = useRef<HTMLDivElement>(null);
  useEffect(() => {
-   if (!capturing || !consent) return;
+   if (!capturing || !consent || !active) return;
    return monitorMicrophone(setLevel, () => setMeterError(true));
- }, [capturing, consent]);
+ }, [capturing, consent, active]);
+ useEffect(() => {
+   if (!active) {
+     recognition.current?.abort();
+     setCapturing(false);
+     window.speechSynthesis?.cancel();
+     setState(current => current === 'SPEAKING' ? 'LISTENING' : current);
+   }
+ }, [active]);
+ const activePage = useRef(active);
+ activePage.current = active;
  useEffect(() => {
    if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
  }, [messages]);
@@ -68,7 +108,7 @@ function LiveAgent(){const[session,setSession]=useState<any>(undefined),[message
      }
      void api.get<{extracted: Record<string, string>}>(`/api/conversations/${session.id}`)
        .then(result => setCustomer(result.extracted)).catch(() => {});
-     if (!('speechSynthesis' in window)) { setState('LISTENING'); return; }
+     if (!activePage.current || !('speechSynthesis' in window)) { setState('LISTENING'); return; }
      const utterance = new SpeechSynthesisUtterance(reply.response);
      utterance.lang = language === 'hi' ? 'hi-IN' : 'en-IN';
      utterance.onend = utterance.onerror = () => setState(current => current === 'SPEAKING' ? 'LISTENING' : current);
@@ -163,7 +203,7 @@ function LiveAgent(){const[session,setSession]=useState<any>(undefined),[message
          <input aria-label="Message" value={input} onChange={event => setInput(event.target.value)} placeholder="Type a message…" disabled={!session || !consent || state === 'PROCESSING' || state === 'SPEAKING'}/>
          <button aria-label="Send message" disabled={!session || !consent || !input.trim() || state === 'PROCESSING' || state === 'SPEAKING'}><Send size={17}/></button>
        </form>
-       <div className="actions">{!session ? <button onClick={start} disabled={!consent}><Mic size={17}/> Start conversation</button> : <>
+       <div className="actions">{!session ? <button onClick={start} disabled={!consent || starting}><Mic size={17}/> {starting ? 'Starting…' : 'Start conversation'}</button> : <>
          <button onClick={listen} disabled={!consent || capturing || state === 'PROCESSING' || state === 'SPEAKING'}><Mic size={17}/> {capturing ? 'Listening…' : 'Listen'}</button>
          {capturing && <button className="secondary" onClick={() => {recognition.current?.abort(); setCapturing(false);}}>Stop listening</button>}
          {state === 'SPEAKING' && <button className="secondary" onClick={() => {window.speechSynthesis.cancel(); setState('LISTENING');}}><VolumeX size={17}/> Stop speaking</button>}
@@ -215,12 +255,25 @@ function Appointments() {
 }
 function Knowledge(){const{data,load,error}=useLoad<any[]>('/api/documents',[]);const[busy,setBusy]=useState(false);return <section><h2>Knowledge base</h2><p>TXT and text-based PDF, maximum 5 MB. Uploaded content is chunked and indexed.</p><ErrorBox text={error}/><input type="file" accept=".txt,.pdf" disabled={busy} onChange={async e=>{const f=e.target.files?.[0];if(!f)return;setBusy(true);const fd=new FormData();fd.append('file',f);try{const r=await fetch('/api/documents',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail);load()}catch(e:any){alert(e.message)}finally{setBusy(false)}}}/>{data.length?<table><thead><tr><th>Document</th><th>Status</th><th>Chunks</th><th></th></tr></thead><tbody>{data.map(x=><tr><td>{x.filename}</td><td>{x.status}</td><td>{x.chunks}</td><td><button className="icon" onClick={async()=>{if(confirm('Delete document and its index?')){await api.del(`/api/documents/${x.id}`);load()}}}><Trash2 size={16}/></button></td></tr>)}</tbody></table>:<Empty>No knowledge documents indexed.</Empty>}</section>}
 function Conversations(){const{data,loading}=useLoad<any[]>('/api/conversations',[]);return <section><h2>Conversation history</h2>{loading?<p>Loading…</p>:data.length?<div className="list">{data.map(x=><article><b>{x.id.slice(0,8)}</b><span>{x.language.toUpperCase()} · {x.status}</span><small>{new Date(x.started_at).toLocaleString()}</small>{x.summary&&<p>{x.summary.purpose} · Score {x.summary.lead_score}</p>}</article>)}</div>:<Empty>No conversation history.</Empty>}</section>}
-function Analytics(){const{data:a}=useLoad<any>('/api/analytics',{});const pie=Object.entries(a.sentiment_distribution||{}).map(([name,value])=>({name,value}));return <div className="two"><section><h2>Lead qualification</h2><ResponsiveContainer width="100%" height={280}><BarChart data={Object.entries(a.lead_distribution||{}).map(([name,value])=>({name,value}))}><XAxis dataKey="name"/><YAxis/><Tooltip/><Bar dataKey="value" fill="#1d4ed8"/></BarChart></ResponsiveContainer></section><section><h2>Transcript sentiment</h2>{pie.length?<ResponsiveContainer width="100%" height={280}><PieChart><Pie data={pie} dataKey="value" nameKey="name" outerRadius={90}>{pie.map((_,i)=><Cell fill={['#16a34a','#64748b','#dc2626'][i%3]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer>:<Empty>No sentiment records.</Empty>}</section></div>}
+function Analytics() {
+  const {data, loading, error} = useLoad<{lead_distribution?:Record<string,number>; sentiment_distribution?:Record<string,number>}>('/api/analytics', {});
+  if (loading) return <p role="status">Loading analytics…</p>;
+  if (error) return <ErrorBox text={error}/>;
+  return <div className="two">{[['Lead qualification', data.lead_distribution], ['Transcript sentiment', data.sentiment_distribution]].map(([label, distribution]) => {
+    const rows = Object.entries(distribution ?? {}).map(([name,value]) => ({name,value}));
+    return <section key={String(label)}><h2>{String(label)}</h2>
+      {rows.some(row => row.value > 0) ? <>
+        <ResponsiveContainer width="100%" height={240}><BarChart data={rows} accessibilityLayer><XAxis dataKey="name"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="value" fill="#2456cc" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>
+        <dl className="customer-fields">{rows.map(row => <div key={row.name}><dt>{row.name}</dt><dd>{row.value}</dd></div>)}</dl>
+      </> : <Empty>No records yet.</Empty>}
+    </section>;
+  })}</div>;
+}
 function Settings(){const{data,load}=useLoad<any>('/api/settings',{});const[form,setForm]=useState<any>();useEffect(()=>setForm(data),[data]);if(!form)return <p>Loading…</p>;return <section><h2>Business settings</h2><form className="gridform" onSubmit={async e=>{e.preventDefault();await api.put('/api/settings',form);load();alert('Settings saved')}}>{Object.entries(form).map(([k,v])=><label>{k.replaceAll('_',' ')}<input value={String(v)} type={typeof v==='number'?'number':'text'} onChange={e=>setForm({...form,[k]:typeof v==='number'?Number(e.target.value):e.target.value})}/></label>)}<button>Save settings</button></form></section>}
 function App() {
   const [page, setPage] = useState<Page>('Live Agent');
   const config = useLoad<{ai_configured: boolean}>('/api/config/status', {ai_configured: false});
-  const content: Record<Page, React.ReactNode> = {Overview:<Overview/>, 'Live Agent':<LiveAgent/>, Leads:<Leads/>, CRM:<CRM/>, Appointments:<Appointments/>, 'Knowledge Base':<Knowledge/>, Conversations:<Conversations/>, Analytics:<Analytics/>, Settings:<Settings/>};
+  const content: Record<Page, React.ReactNode> = {Overview:<Overview/>, 'Live Agent':<LiveAgent active={page === 'Live Agent'}/>, Leads:<Leads/>, CRM:<CRM/>, Appointments:<Appointments/>, 'Knowledge Base':<Knowledge/>, Conversations:<Conversations/>, Analytics:<Analytics/>, Settings:<Settings/>};
   return <div className="shell">
     <a className="skip-link" href="#workspace">Skip to workspace</a>
     <aside>
