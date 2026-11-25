@@ -1,5 +1,7 @@
 # Progress
 
+The frontend redesign makes Live Voice Agent the default workspace. It adds a Web Audio input meter, transcript and activity panels, customer details, lead score meters, CRM search, and a date-filtered appointment agenda. Real microphone and visual browser verification remain open.
+
 ## Completed
 - Milestone 0: inspected clean workspace and validated Python 3.12.10, Node 22.20.0, npm 10.9.3.
 - Defined modular-monolith architecture and persistent engineering rules.

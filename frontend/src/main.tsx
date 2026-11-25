@@ -224,7 +224,7 @@ function LiveAgent({active}: {active: boolean}){const[session,setSession]=useSta
    </div>
  </div>;
 }
-function Leads(){const [query,setQuery]=useState('');const{data,loading,error,load}=useLoad<any[]>(`/api/leads?q=${encodeURIComponent(query)}`,[]);const[form,setForm]=useState({name:'',email:'',company:'',requirements:'',budget:'',authority:'',timeline:''});const save=async(e:React.FormEvent)=>{e.preventDefault();await api.post('/api/leads',form);setForm({name:'',email:'',company:'',requirements:'',budget:'',authority:'',timeline:''});load()};return <><ErrorBox text={error}/><section><h2>Add or update lead</h2><form className="gridform" onSubmit={save}>{Object.keys(form).map(k=><input key={k} aria-label={k} required={k==='email'} placeholder={k.replace('_',' ')} value={(form as any)[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>)}<button>Save lead</button></form></section><section><div className="sectionTitle"><h2>Lead pipeline</h2><a className="button" href="/api/leads-export.csv"><Download size={16}/> Export CSV</a></div><label className="field">Search leads<input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Name, company or email"/></label>{loading?<p>Loading…</p>:data.length?<table><thead><tr><th>Name</th><th>Company</th><th>Status</th><th>Score</th><th>Class</th><th></th></tr></thead><tbody>{data.map(x=><tr key={x.id}><td>{x.name||'Not provided'}<small>{x.email}</small></td><td>{x.company||'—'}</td><td>{x.status}</td><td><meter min={0} max={100} value={x.score} aria-label="Lead score"/> {x.score}/100</td><td><span className={`badge ${x.classification}`}>{x.classification}</span></td><td><button className="icon" aria-label="Delete" onClick={async()=>{if(confirm('Delete this lead?')){await api.del(`/api/leads/${x.id}`);load()}}}><Trash2 size={16}/></button></td></tr>)}</tbody></table>:<Empty>No leads have been saved.</Empty>}</section></>}
+function Leads(){const [query,setQuery]=useState('');const{data,loading,error,load}=useLoad<any[]>(`/api/leads?q=${encodeURIComponent(query)}`,[]);const[form,setForm]=useState({name:'',email:'',company:'',requirements:'',budget:'',authority:'',timeline:''});const [failure,setFailure]=useState('');const [saving,setSaving]=useState(false);const save=async(e:React.FormEvent)=>{e.preventDefault();if(saving)return;setSaving(true);setFailure('');try{await api.post('/api/leads',form);setForm({name:'',email:'',company:'',requirements:'',budget:'',authority:'',timeline:''});load()}catch(error){setFailure(error instanceof Error?error.message:'Lead could not be saved')}finally{setSaving(false)}};return <><ErrorBox text={error || failure}/><section><h2>Add or update lead</h2><form className="gridform" onSubmit={save}>{Object.keys(form).map(k=><input key={k} aria-label={k} required={k==='email'} placeholder={k.replace('_',' ')} value={(form as any)[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>)}<button disabled={saving}>{saving ? "Saving…" : "Save lead"}</button></form></section><section><div className="sectionTitle"><h2>Lead pipeline</h2><a className="button" href="/api/leads-export.csv"><Download size={16}/> Export CSV</a></div><label className="field">Search leads<input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Name, company or email"/></label>{loading?<p>Loading…</p>:data.length?<table><thead><tr><th>Name</th><th>Company</th><th>Status</th><th>Score</th><th>Class</th><th></th></tr></thead><tbody>{data.map(x=><tr key={x.id}><td>{x.name||'Not provided'}<small>{x.email}</small></td><td>{x.company||'—'}</td><td>{x.status}</td><td><meter min={0} max={100} value={x.score} aria-label="Lead score"/> {x.score}/100</td><td><span className={`badge ${x.classification}`}>{x.classification}</span></td><td><button className="icon" aria-label="Delete" onClick={async()=>{if(confirm('Delete this lead?')){try{await api.del(`/api/leads/${x.id}`);load()}catch(error){setFailure(error instanceof Error?error.message:"Lead could not be deleted")}}}}><Trash2 size={16}/></button></td></tr>)}</tbody></table>:<Empty>No leads have been saved.</Empty>}</section></>}
 function CRM(){return <Leads/>}
 function Appointments() {
   const {data, load, loading, error} = useLoad<{id:string; lead_id:string; starts_at:string; status:string}[]>('/api/appointments', []);
@@ -269,7 +269,32 @@ function Analytics() {
     </section>;
   })}</div>;
 }
-function Settings(){const{data,load}=useLoad<any>('/api/settings',{});const[form,setForm]=useState<any>();useEffect(()=>setForm(data),[data]);if(!form)return <p>Loading…</p>;return <section><h2>Business settings</h2><form className="gridform" onSubmit={async e=>{e.preventDefault();await api.put('/api/settings',form);load();alert('Settings saved')}}>{Object.entries(form).map(([k,v])=><label>{k.replaceAll('_',' ')}<input value={String(v)} type={typeof v==='number'?'number':'text'} onChange={e=>setForm({...form,[k]:typeof v==='number'?Number(e.target.value):e.target.value})}/></label>)}<button>Save settings</button></form></section>}
+function Settings() {
+  const {data, loading, error, load} = useLoad<Record<string, string | number>>('/api/settings', {});
+  const [form, setForm] = useState(data);
+  const [notice, setNotice] = useState('');
+  const [failure, setFailure] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setForm(data), [data]);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setNotice('');
+    setFailure('');
+    try { await api.put('/api/settings', form); setNotice('Settings saved.'); load(); }
+    catch (error) { setFailure(error instanceof Error ? error.message : 'Settings could not be saved'); }
+    finally { setSaving(false); }
+  }
+  if (loading) return <p role="status">Loading settings…</p>;
+  if (error) return <ErrorBox text={error}/>;
+  return <section><h2>Business settings</h2><ErrorBox text={failure}/><form className="gridform" onSubmit={save}>
+    {Object.entries(form).map(([key,value]) => <label key={key}>{key.replaceAll('_',' ')}
+      {key === 'default_language' ? <select value={value} onChange={event => setForm({...form, [key]:event.target.value})}><option value="en">English</option><option value="hi">Hindi</option></select> :
+      <input value={value} type={typeof value === 'number' ? 'number' : 'text'} required={typeof value === 'number'} onChange={event => setForm({...form, [key]:typeof value === 'number' ? Number(event.target.value) : event.target.value})}/>}
+    </label>)}
+    <button disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+  </form><p role="status">{notice}</p></section>;
+}
 function App() {
   const [page, setPage] = useState<Page>('Live Agent');
   const config = useLoad<{ai_configured: boolean}>('/api/config/status', {ai_configured: false});

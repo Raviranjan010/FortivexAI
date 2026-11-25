@@ -1,5 +1,7 @@
 # Test Report
 
+Frontend redesign verification on 2026-11-25: `npm run lint` and `npm run build` passed. `npm run test` passed all 3 tests, including microphone signal scaling. Backend regression was 16 passed and 1 credential-gated skip. The Vite proxy returned a healthy database connection. Vite reported a 654.23 KB JavaScript chunk warning. Browser appearance and physical microphone behavior were not manually verified.
+
 The local API workflow uses a deterministic provider double. Live Gemini is tracked separately.
 
 The follow-up workflow test exercised retrieval, lead storage and scoring, proposal generation, model confirmation rejection, cross-session rejection, customer confirmation, idempotency, summary, and analytics. Vite forwarded live health and config requests to FastAPI on port 8011, which reported `ai_configured=false`.
