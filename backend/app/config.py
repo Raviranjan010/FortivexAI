@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./salespilot.db"
     frontend_origin: str = "http://localhost:5173"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     business_timezone: str = "Asia/Kolkata"
     max_upload_mb: int = 5
     rag_top_k: int = 4

@@ -1,6 +1,71 @@
 from datetime import datetime,timedelta,timezone
 from app import models,services
 from app import tools
+from app import ai
+
+
+def test_partial_lead_edit_preserves_score_and_normalizes_contact(client):
+    lead = client.post("/api/leads", json={"budget": "Approved", "authority": "Unknown"}).json()
+    edited = client.put(f"/api/leads/{lead['id']}", json={"email": " SALES@EXAMPLE.TEST "}).json()
+    assert edited["email"] == "sales@example.test"
+    assert edited["score"] == 25
+
+
+def test_invalid_settings_and_empty_document_are_rejected(client):
+    assert client.put("/api/settings", json={"timezone": "Invalid/Timezone"}).status_code == 422
+    assert client.put("/api/settings", json={"business_start": 18, "business_end": 9}).status_code == 422
+    assert client.post("/api/documents", files={"file": ("empty.txt", b" ")}).status_code == 422
+
+
+def test_changed_slot_length_does_not_allow_overlap(client):
+    lead = client.post("/api/leads", json={"email": "overlap@example.test"}).json()
+    start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=5, minute=0, second=0, microsecond=0)
+    payload = {"lead_id": lead["id"], "confirmed": True, "starts_at": start.isoformat()}
+    assert client.post("/api/appointments", json=payload).status_code == 200
+    assert client.put("/api/settings", json={"appointment_minutes": 15}).status_code == 200
+    payload["starts_at"] = (start + timedelta(minutes=15)).isoformat()
+    assert client.post("/api/appointments", json=payload).status_code == 409
+
+
+def test_conversation_to_crm_proposal_booking_and_summary(client, monkeypatch):
+    slot = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=5, minute=0, second=0, microsecond=0)
+
+    class TestProvider:
+        def respond(self, messages, context, language):
+            if messages[-1]["role"] == "system":
+                return ai.AIResult(response="See the recorded action.")
+            assert any(source["filename"] == "pricing.txt" for source in context)
+            return ai.AIResult(response="Checking", tool_calls=[
+                ai.ToolCall(name="save_lead_to_crm", arguments={
+                    "email": "demo@example.test", "budget": "approved", "timeline": "30 days",
+                    "authority": "owner", "requirements": "analytics",
+                }),
+            ]) if messages[-1]["content"] == "Analytics pricing" else ai.AIResult(
+                response="Preparing proposal", tool_calls=[
+                    ai.ToolCall(name="propose_appointment", arguments={"lead_id": lead_id, "starts_at": slot.isoformat()}),
+                    ai.ToolCall(name="confirm_appointment", arguments={"lead_id": lead_id, "starts_at": slot.isoformat(), "confirmed": True}),
+                ])
+
+    monkeypatch.setattr(ai, "get_provider", TestProvider)
+    client.post("/api/documents", files={"file": ("pricing.txt", b"Analytics pricing for fictional NovaCRM")})
+    sid = client.post("/api/conversations", json={}).json()["id"]
+    path = f"/api/conversations/{sid}"
+    saved = client.post(f"{path}/messages", json={"content": "Analytics pricing"}).json()
+    lead_id = saved["tool_events"][0]["result"]["lead_id"]
+    reply = client.post(f"{path}/messages", json={"content": "Analytics demo"}).json()
+    proposal, rejected = reply["tool_events"]
+    assert rejected["status"] == "failed"
+    assert client.get("/api/appointments").json() == []
+    other = client.post("/api/conversations", json={}).json()["id"]
+    assert client.post(f"/api/conversations/{other}/proposals/{proposal['id']}/confirm").status_code == 404
+    confirm_url = f"{path}/proposals/{proposal['id']}/confirm"
+    booking = client.post(confirm_url).json()
+    assert booking["status"] == "confirmed"
+    assert client.post(confirm_url).json()["id"] == booking["id"]
+    summary = client.post(f"{path}/end").json()["summary"]
+    assert summary["appointment_status"] == "confirmed"
+    assert summary["lead_score"] == 100
+    assert client.get("/api/analytics").json()["confirmed_appointments"] == 1
 
 def test_health_and_no_secret(client):
     assert client.get("/api/health").status_code==200

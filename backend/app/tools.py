@@ -29,9 +29,15 @@ def execute(db: Session, session_id: str, name: str, arguments: dict):
         elif name=="update_customer_profile":
             session=db.get(models.Conversation,session_id); session.extracted={**session.extracted,**{k:v for k,v in args.model_dump().items() if v is not None}}; db.flush(); result={"updated_fields":[k for k,v in args.model_dump().items() if v is not None]}
         elif name=="check_appointment_availability": result={"slots":[x.isoformat() for x in services.slots(db,args.day)[:8]]}
-        elif name=="propose_appointment": result={"proposed":True,"starts_at":args.starts_at.isoformat(),"requires_explicit_confirmation":True}
+        elif name=="propose_appointment":
+            lead = db.get(models.Lead, args.lead_id) if args.lead_id else None
+            if not lead or lead.conversation_id != session_id:
+                raise ValueError("Save the customer in this conversation before proposing a slot")
+            if args.starts_at.tzinfo is None or args.starts_at not in services.slots(db, args.starts_at):
+                raise ValueError("Choose an available slot with a timezone offset")
+            result = {"proposed": True, "starts_at": args.starts_at.isoformat(), "lead_id": lead.id}
         elif name=="confirm_appointment":
-            appointment=services.book(db,args.lead_id,args.starts_at,args.confirmed,args.idempotency_key); result={"appointment_id":appointment.id,"status":appointment.status,"starts_at":appointment.starts_at.isoformat()}
+            raise ValueError("Only the customer can confirm a stored proposal")
         elif name=="save_lead_to_crm":
             lead=services.create_lead(db,{**args.model_dump(),"conversation_id":session_id}); result={"lead_id":lead.id,"saved":True,"score":lead.score,"classification":lead.classification}
         else:
@@ -39,6 +45,8 @@ def execute(db: Session, session_id: str, name: str, arguments: dict):
         status="success"
     except ValidationError as exc:
         result={"error":"Invalid tool arguments","details":exc.errors(include_input=False)}; status="failed"
+    except ValueError as exc:
+        result={"error":str(exc)}; status="failed"
     event=models.ToolEvent(conversation_id=session_id,tool_name=name,status=status,result=result,duration_ms=(time.perf_counter()-start)*1000)
     db.add(event); db.commit(); db.refresh(event)
     return result,event

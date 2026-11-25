@@ -9,10 +9,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from . import models
 
 def bant(data: dict) -> tuple[int, str, dict]:
-    def points(key, evidence):
-        value = data.get(key)
-        return {"points": 25 if value and str(value).strip() else 0, "evidence": str(value) if value else "Unknown"}
-    out = {"budget": points("budget", data), "authority": points("authority", data), "need": points("requirements", data), "timeline": points("timeline", data)}
+    def points(key):
+        value = str(data.get(key) or "").strip()
+        known = value.casefold() not in {"", "unknown", "n/a", "none", "not provided", "undecided", "tbd"}
+        return {"points": 25 if known else 0, "evidence": value if known else "Unknown"}
+    out = {"budget": points("budget"), "authority": points("authority"), "need": points("requirements"), "timeline": points("timeline")}
     score = sum(x["points"] for x in out.values())
     return score, "Hot" if score >= 75 else "Warm" if score >= 40 else "Cold", out
 
@@ -59,11 +60,16 @@ def slots(db, day: datetime):
     start = local.replace(hour=cfg["business_start"], minute=0, second=0, microsecond=0)
     end = local.replace(hour=cfg["business_end"] % 24, minute=0, second=0, microsecond=0)
     if cfg["business_end"] == 24: end = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    occupied = set(db.scalars(select(models.Appointment.starts_at).where(models.Appointment.status == "confirmed")).all())
+    occupied = db.execute(select(models.Appointment.starts_at, models.Appointment.ends_at).where(models.Appointment.status == "confirmed")).all()
     result=[]; cursor=start
     while cursor + timedelta(minutes=cfg["appointment_minutes"]) <= end:
         utc=cursor.astimezone(timezone.utc)
-        if utc > datetime.now(timezone.utc) and utc.replace(tzinfo=None) not in occupied and utc not in occupied: result.append(utc)
+        slot_end = (cursor + timedelta(minutes=cfg["appointment_minutes"])).astimezone(timezone.utc)
+        if utc > datetime.now(timezone.utc) and not any(
+            existing_start.replace(tzinfo=timezone.utc) < slot_end and existing_end.replace(tzinfo=timezone.utc) > utc
+            for existing_start, existing_end in occupied
+        ):
+            result.append(utc)
         cursor += timedelta(minutes=cfg["appointment_minutes"])
     return result
 
@@ -77,7 +83,12 @@ def book(db, lead_id, starts_at, confirmed, key=None):
     if not cfg["business_start"] <= local.hour < cfg["business_end"]: raise ValueError("Outside business hours")
     if key:
         found=db.scalar(select(models.Appointment).where(models.Appointment.idempotency_key==key))
-        if found: return found
+        if found:
+            if found.lead_id != lead_id or found.starts_at.replace(tzinfo=timezone.utc) != starts_at:
+                raise ValueError("Booking key belongs to another appointment")
+            return found
+    if starts_at not in slots(db, starts_at):
+        raise ValueError("Time is not an available business slot")
     ap=models.Appointment(lead_id=lead_id, starts_at=starts_at, ends_at=starts_at+timedelta(minutes=cfg["appointment_minutes"]), idempotency_key=key)
     db.add(ap)
     try: db.commit()

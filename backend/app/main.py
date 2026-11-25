@@ -1,11 +1,13 @@
 import io, re
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text as sql_text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from . import ai, models, schemas, services, tools
 from .config import get_settings
@@ -16,7 +18,9 @@ app=FastAPI(title="SalesPilot AI API",version="1.0.0")
 app.add_middleware(CORSMiddleware,allow_origins=[cfg.frontend_origin],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 
 @app.get("/api/health")
-def health(): return {"status":"ok","database":"connected","service":cfg.app_name}
+def health(db: Session = Depends(get_db)):
+    db.execute(sql_text("SELECT 1"))
+    return {"status":"ok","database":"connected","service":cfg.app_name}
 @app.get("/api/config/status")
 def config_status(): return {"ai_configured":bool(cfg.gemini_api_key),"model":cfg.gemini_model,"timezone":cfg.business_timezone}
 
@@ -37,27 +41,49 @@ def chat(sid:str,body:schemas.ChatIn,db:Session=Depends(get_db)):
     if not session or session.status!="active": raise HTTPException(404,"Active conversation not found")
     user=models.Message(conversation_id=sid,role="user",content=body.content); db.add(user); db.commit()
     sources=services.retrieve(db,body.content,cfg.rag_top_k)
-    history=[{"role":m.role,"content":m.content} for m in session.messages[-12:]]
-    try: result=ai.get_provider().respond(history,sources,session.language)
+    history=[{"role":"system","content":"Known customer profile: "+str(session.extracted)}]
+    history.extend({"role":m.role,"content":m.content} for m in session.messages[-10:])
+    try:
+        provider = ai.get_provider()
+        result = provider.respond(history,sources,session.language)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     events=[]
     for call in result.tool_calls[:3]:
         try:
-            outcome,event=tools.execute(db,sid,call.name,call.arguments); events.append({"tool_name":event.tool_name,"status":event.status,"result":outcome,"duration_ms":event.duration_ms,"timestamp":event.created_at.isoformat()})
+            outcome,event=tools.execute(db,sid,call.name,call.arguments); events.append({"id":event.id,"tool_name":event.tool_name,"status":event.status,"result":outcome,"duration_ms":event.duration_ms,"timestamp":event.created_at.isoformat()})
         except ValueError as exc:
             events.append({"tool_name":call.name,"status":"failed","result":{"error":str(exc)}})
     if events:
         history.append({"role":"system","content":"Observable tool results: "+str(events)})
-        try: result=ai.get_provider().respond(history,sources,session.language)
-        except RuntimeError as exc: raise HTTPException(503,str(exc))
+        try: result=provider.respond(history,sources,session.language)
+        except RuntimeError:
+            result=ai.AIResult(response="The agent could not finish its reply. Review the recorded actions below." if session.language=="en" else "जवाब पूरा नहीं हो सका। नीचे दर्ज कार्रवाइयाँ देखें।", extracted=result.extracted)
     session.extracted={**session.extracted,**{k:v for k,v in result.extracted.items() if v not in (None,"")}}
     assistant=models.Message(conversation_id=sid,role="assistant",content=result.response); db.add(assistant); db.commit()
     return {"session_id":sid,"response":result.response,"sources":sources,"tool_events":events}
+
+@app.post("/api/conversations/{sid}/proposals/{proposal_id}/confirm", response_model=schemas.AppointmentOut)
+def confirm_proposal(sid: str, proposal_id: str, db: Session=Depends(get_db)):
+    session = db.get(models.Conversation, sid)
+    proposal = db.get(models.ToolEvent, proposal_id)
+    if (not session or session.status != "active" or not proposal or proposal.conversation_id != sid
+            or proposal.tool_name != "propose_appointment" or proposal.status != "success"):
+        raise HTTPException(404, "Active appointment proposal not found")
+    lead = db.get(models.Lead, proposal.result["lead_id"])
+    if not lead or lead.conversation_id != sid:
+        raise HTTPException(409, "The customer is no longer associated with this session")
+    try:
+        appointment = services.book(db, lead.id, datetime.fromisoformat(proposal.result["starts_at"]), True, proposal.id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return appointment
 
 @app.post("/api/conversations/{sid}/end",response_model=schemas.SessionOut)
 def end_session(sid:str,db:Session=Depends(get_db)):
     row=db.get(models.Conversation,sid)
     if not row: raise HTTPException(404,"Conversation not found")
+    if row.status == "ended":
+        return row
     row.status="ended"; row.ended_at=datetime.now(timezone.utc)
     lead=db.scalar(select(models.Lead).where(models.Lead.conversation_id==sid))
     row.summary={"customer":lead.name if lead else row.extracted.get("name"),"purpose":"NovaCRM sales enquiry","product_interest":lead.product_interest if lead else row.extracted.get("product_interest"),"requirements":lead.requirements if lead else row.extracted.get("requirements"),"budget":lead.budget if lead else row.extracted.get("budget"),"timeline":lead.timeline if lead else row.extracted.get("timeline"),"objections":lead.objections if lead else None,"sentiment":lead.sentiment if lead else "Neutral","lead_score":lead.score if lead else 0,"actions":[e.tool_name for e in db.scalars(select(models.ToolEvent).where(models.ToolEvent.conversation_id==sid))],"appointment_status":"confirmed" if lead and db.scalar(select(models.Appointment).where(models.Appointment.lead_id==lead.id,models.Appointment.status=="confirmed")) else "not booked","recommended_follow_up":"Review the enquiry and contact the customer if consent was provided."}
@@ -75,8 +101,21 @@ def add_lead(body:schemas.LeadIn,db:Session=Depends(get_db)): return services.cr
 def update_lead(lid:str,body:schemas.LeadIn,db:Session=Depends(get_db)):
     row=db.get(models.Lead,lid)
     if not row: raise HTTPException(404,"Lead not found")
-    for k,v in body.model_dump(exclude_unset=True).items(): setattr(row,k,v)
-    score,c,b=services.bant(body.model_dump()); row.score,row.classification,row.score_breakdown=score,c,b; db.commit(); db.refresh(row); return row
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if key == "email" and value:
+            value = value.strip().lower()
+        if key == "phone" and value:
+            value = re.sub(r"\D", "", value)
+        setattr(row, key, value)
+    fields = {key: getattr(row, key) for key in ("budget", "authority", "requirements", "timeline")}
+    row.score, row.classification, row.score_breakdown = services.bant(fields)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Lead contact details conflict with an existing lead") from exc
+    db.refresh(row)
+    return row
 @app.delete("/api/leads/{lid}",status_code=204)
 def delete_lead(lid:str,db:Session=Depends(get_db)):
     row=db.get(models.Lead,lid)
@@ -85,7 +124,9 @@ def delete_lead(lid:str,db:Session=Depends(get_db)):
 @app.get("/api/leads-export.csv")
 def export_leads(db:Session=Depends(get_db)):
     out=io.StringIO(); w=__import__('csv').writer(out); w.writerow(["name","email","company","status","score","classification"])
-    for x in db.scalars(select(models.Lead)): w.writerow([x.name,x.email,x.company,x.status,x.score,x.classification])
+    for lead in db.scalars(select(models.Lead)):
+        values = [lead.name, lead.email, lead.company, lead.status, lead.score, lead.classification]
+        w.writerow(["'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
     return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=leads.csv"})
 
 @app.get("/api/appointments",response_model=list[schemas.AppointmentOut])
@@ -114,8 +155,11 @@ async def upload(file:UploadFile=File(...),db:Session=Depends(get_db)):
     if len(data)>cfg.max_upload_mb*1024*1024: raise HTTPException(413,"File is too large")
     try:text=data.decode("utf-8") if suffix==".txt" else "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(data)).pages)
     except Exception: raise HTTPException(422,"Document text could not be extracted")
+    segments = chunks(text)
+    if not segments:
+        raise HTTPException(422, "Document contains no extractable text")
     safe=Path(file.filename or "document").name; doc=models.Document(filename=safe); db.add(doc); db.flush()
-    for i,value in enumerate(chunks(text)): db.add(models.Chunk(document_id=doc.id,ordinal=i,text=value))
+    for i,value in enumerate(segments): db.add(models.Chunk(document_id=doc.id,ordinal=i,text=value))
     db.commit(); return {"id":doc.id,"filename":safe,"status":"indexed"}
 @app.delete("/api/documents/{did}",status_code=204)
 def delete_document(did:str,db:Session=Depends(get_db)):
@@ -130,4 +174,10 @@ def get_analytics(db:Session=Depends(get_db)): return services.analytics(db)
 def get_settings_api(db:Session=Depends(get_db)): return services.business_settings(db)
 @app.put("/api/settings")
 def put_settings(body:schemas.SettingsIn,db:Session=Depends(get_db)):
+    try:
+        ZoneInfo(body.timezone)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise HTTPException(422, "Unknown business timezone") from exc
+    if body.business_start >= body.business_end:
+        raise HTTPException(422, "Business closing hour must follow opening hour")
     row=db.get(models.Setting,"business") or models.Setting(key="business",value={}); row.value=body.model_dump(); db.add(row); db.commit(); return row.value

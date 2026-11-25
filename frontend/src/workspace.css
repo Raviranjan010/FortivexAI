@@ -1,0 +1,34 @@
+:root{--ink:#15243e;--muted:#52647d;--line:#dbe4ef;--blue:#2456cc;--pale:#f1f6fd;--navy:#0e1c35}
+body{color:var(--ink);background:#f4f7fb;font-family:Inter,"Segoe UI",sans-serif}
+.shell{grid-template-columns:224px minmax(0,1fr)}
+aside{background:var(--navy);padding:21px 14px;overflow:auto}
+.brand{padding:0 6px 22px}.brand>div{display:grid;place-items:center;border-radius:10px;background:#2456cc}.brand small{color:#adc0db;font-size:11px}
+.nav-group>p{color:#a6b8d1;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;margin:17px 9px 6px}
+nav button{padding:.63rem .7rem;margin:2px 0;font-weight:500;font-size:.86rem}
+nav button.active{background:#263e62;box-shadow:inset 3px 0 #82aaff}
+aside footer{display:flex;align-items:center;gap:8px;padding:16px 8px 0;color:#a6b8d1}
+main{max-width:1520px;padding:0 clamp(16px,3vw,44px) 36px}
+header{height:auto;min-height:104px;gap:12px}header h1{font-size:clamp(1.5rem,3vw,2rem);letter-spacing:-.04em;margin:.35rem 0 0}header small,.muted{color:var(--muted)}
+section,.agent,.metrics article{border-color:var(--line);border-radius:14px;box-shadow:0 2px 5px #142b4a08}
+section{padding:20px}h2{letter-spacing:-.015em}button,.button{min-height:40px;background:var(--blue)}button.secondary{background:#edf3fc;color:#203c68}button.secondary:hover{background:#deebff}button.danger{background:#fff1f2;color:#a12439}button.danger:hover{background:#ffe1e6}
+input:not([type=checkbox]),select{border:1px solid #c4d2e3;border-radius:8px;padding:.65rem .75rem;color:var(--ink);background:white;min-width:0}
+:focus-visible{outline:3px solid #557ffa;outline-offset:3px}.skip-link{position:fixed;left:1rem;top:1rem;z-index:10;background:white;padding:.75rem;transform:translateY(-200%)}.skip-link:focus{transform:none}
+.status{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#f5f8fc;border-radius:20px;padding:6px 10px;font-size:.75rem;font-weight:650;color:#3e5271;white-space:nowrap;text-transform:capitalize}
+.status i{width:7px;height:7px;background:#7b8da7;border-radius:50%}.status.is-live{background:#eaf6ef;color:#17663c;border-color:#cbe6d6}.status.is-live i{background:#218451}
+.voice-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,300px);gap:20px;align-items:start}
+.agent{padding:0;min-width:0;overflow:hidden}.agentTop,.voice-strip,.transcript-heading,.agent-bottom{padding:16px 20px}.agentTop,.voice-strip,.transcript-heading{border-bottom:1px solid var(--line)}
+.identity,.panel-title{display:flex;align-items:center;gap:10px}.identity h2,.panel-title h2,.transcript-heading h2{margin:0}.identity span:not(.agent-icon),.identity small,.transcript-heading span{color:var(--muted);font-size:.78rem}.identity small{display:block;margin-top:4px}
+.agent-icon,.transcript-empty svg{display:grid;place-items:center;background:#eaf1ff;color:#2456cc;border-radius:10px;padding:9px;width:42px;height:42px}
+.voice-strip{display:flex;justify-content:space-between;align-items:center;gap:13px;background:var(--pale);color:#254776}.language{display:grid;gap:4px;font-size:.72rem}.language select{padding:.4rem .6rem}
+.signal{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0}.signal i{width:4px;border-radius:4px;background:#cbd9ee}.signal i.lit{background:#2c65e3}
+.transcript-heading{display:flex;justify-content:space-between;align-items:center;padding-block:12px}
+.transcript{height:clamp(250px,39vh,410px);background:#fbfcfe;border:0;border-bottom:1px solid var(--line);padding:17px 20px}.transcript-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;height:100%;color:var(--muted);font-size:.86rem}.transcript-empty strong{color:var(--ink);font-size:1rem}
+.bubble{max-width:min(88%,620px);overflow-wrap:anywhere;line-height:1.55}.bubble b{font-size:.8rem}.bubble.user{background:#edf3ff}.composer{margin:0;gap:7px}.composer button{border-radius:8px}.composer input{border-radius:8px}.actions{flex-wrap:wrap}.consent{background:none;padding:0;color:var(--muted);line-height:1.45;margin-bottom:0}
+.panel-title{color:#284b7c;margin-bottom:13px}.customer-fields{margin:0 0 14px}.customer-fields div{display:flex;gap:10px;justify-content:space-between;border-bottom:1px solid #edf1f6;padding:9px 0;font-size:.8rem}.customer-fields dt{color:var(--muted)}.customer-fields dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.score-heading{display:flex;justify-content:space-between;gap:10px;font-size:.8rem}.score-heading span{color:var(--muted)}meter{accent-color:var(--blue);width:72px}.insights meter{width:100%;height:14px}.insights .empty{padding:17px 12px;font-size:.82rem}
+.agent-activity>span{border-left:2px solid #a7c0e6;padding:6px 8px;overflow-wrap:anywhere}.agent-activity>strong{display:none}
+.error{border:1px solid #f0c0ca;background:#fff2f4}.empty{color:var(--muted);line-height:1.5}.field{display:grid;gap:5px;color:var(--muted);font-size:.8rem;margin-block:8px}.field input{max-width:320px}.sectionTitle{gap:10px;flex-wrap:wrap}.sectionTitle h2{margin:0}
+.table-scroll{overflow:auto}th{font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}tbody tr:hover{background:#f7faff}.metrics article{border-top:3px solid #9bb9f6}.metrics strong{font-variant-numeric:tabular-nums}.two>section{min-width:0}
+@media(max-width:1100px){.voice-layout{grid-template-columns:minmax(0,1fr)}.insights{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}
+@media(max-width:800px){.shell{grid-template-columns:64px minmax(0,1fr)}aside{padding:12px 7px}.nav-group>p,aside footer{display:none}.nav-group+.nav-group{border-top:1px solid #344562;margin-top:7px;padding-top:7px}.brand{justify-content:center;padding:0 0 12px}.agentTop,.voice-strip,.transcript-heading,.agent-bottom,.transcript{padding-inline:13px}}
+@media(max-width:520px){header{align-items:flex-start;flex-direction:column;justify-content:center;padding:12px 0;gap:7px}.voice-strip{flex-wrap:wrap}.signal{order:3;flex-basis:100%;height:26px}.insights{grid-template-columns:1fr}.identity{gap:7px}.status{white-space:normal}.agentTop{flex-wrap:wrap;gap:8px}.bubble{max-width:96%}}

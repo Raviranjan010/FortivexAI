@@ -1,6 +1,10 @@
 # Test Report
 
-No tests have run yet. This file records commands, dates, pass/fail counts, and whether dependencies are real, test doubles, or manually verified.
+The local API workflow uses a deterministic provider double. Live Gemini is tracked separately.
+
+The follow-up workflow test exercised retrieval, lead storage and scoring, proposal generation, model confirmation rejection, cross-session rejection, customer confirmation, idempotency, summary, and analytics. Vite forwarded live health and config requests to FastAPI on port 8011, which reported `ai_configured=false`.
+
+Follow-up rerun on 2026-11-25: 13 backend tests passed, 1 credential-gated live test skipped, 2 frontend tests passed, and TypeScript/Vite production build passed with a bundle-size warning. `git diff --check` passed. To opt in when a key is configured, set `$env:SALESPILOT_LIVE_TEST='1'` and run `.\.venv\Scripts\python -m pytest backend/tests/test_provider.py -q`.
 
 | Date | Scope | Command | Result | Evidence |
 |---|---|---|---|---|
